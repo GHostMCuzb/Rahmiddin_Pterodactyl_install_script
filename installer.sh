@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Ranglar uchun
+# Ranglar
 CYAN='\e[36m'
 GREEN='\e[32m'
 YELLOW='\e[33m'
@@ -17,44 +17,26 @@ echo "██╔══██╗██╔══██║██╔══██║�
 echo "██║  ██║██║  ██║██║  ██║██║ ╚═╝ ██║██║██████╔╝██║██║██║ ╚████║"
 echo "╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝     ╚═╝╚═╝╚═════╝ ╚═╝╚═╝╚═╝  ╚═══╝"
 echo -e "${RESET}"
+echo "RAHMIDDIN VPS - AUTO INSTALLER"
+echo "=============================="
 
-echo "RAHMIDDIN VPS"
-echo ""
-echo "========================"
-echo "A : Pterodactyl panel o'rnatish"
-echo "B : Wings o'rnatish (hozircha ishlamaydi)"
-echo "C : Exit"
-echo "========================"
-echo ""
-
-read -p "Tanlang (A/B/C): " choice
-
-if [[ "$choice" == "A" || "$choice" == "a" ]]; then
-    echo -e "${YELLOW}✅ Pterodactyl panel o'rnatilmoqda...${RESET}"
-    
-    # Root huquqini tekshirish
-    if [ "$EUID" -ne 0 ]; then 
-      echo "Iltimos, scriptni sudo bilan ishga tushiring!"
-      exit 1
-    fi
-
-    # Docker o'rnatish
-    apt update -y
-    apt install -y docker.io docker-compose
-    systemctl start docker
-    systemctl enable docker
-
-    # Papka yaratish
-    mkdir -p /var/www/pterodactyl
-    cd /var/www/pterodactyl
-
-    # Codespaces URLni aniqlash
+# 1. Codespaces URLni aniqlash
+# Codespaces portni avtomatik 'public' qilishi uchun linkni to'g'ri yasash kerak
+if [[ "$CODESPACE_NAME" != "" ]]; then
     AUTO_URL="https://${CODESPACE_NAME}-8030.app.github.dev"
+else
+    AUTO_URL="http://localhost:8030"
+fi
 
-    # Docker-compose faylini yaratish (Siz xohlagan kod)
-    cat <<EOF > docker-compose.yml
+echo -e "${YELLOW}🔄 Tizim yangilanmoqda va Docker o'rnatilmoqda...${RESET}"
+apt update -y && apt install -y docker.io docker-compose > /dev/null 2>&1
+
+# 2. Papka va Konfiguratsiya
+mkdir -p /var/www/pterodactyl
+cd /var/www/pterodactyl
+
+cat <<EOF > docker-compose.yml
 version: '3.8'
-
 services:
   database:
     image: mariadb:10.5
@@ -67,11 +49,9 @@ services:
       MYSQL_USER: "pterodactyl"
       MYSQL_PASSWORD: "YourSecurePassword"
       MYSQL_ROOT_PASSWORD: "YourRootPassword"
-
   cache:
     image: redis:alpine
     restart: always
-
   panel:
     image: ghcr.io/pterodactyl/panel:latest
     restart: always
@@ -101,29 +81,31 @@ services:
       TRUSTED_PROXIES: "*"
 EOF
 
-    # Ishga tushirish
-    docker-compose up -d
-
-    echo -e "${YELLOW}⏳ Tizim sozlanmoqda (20 soniya kuting)...${RESET}"
-    sleep 20
-
-    # Login Error (Unexpected Error) ni tuzatish uchun muhim qism
-    docker exec -i panel php artisan key:generate --force
-    docker exec -i panel php artisan config:clear
-    docker exec -i panel php artisan cache:clear
-
-    echo "------------------------------------"
-    echo -e "${GREEN}Admin panel yaratishni boshlaymiz:${RESET}"
-    docker exec -it panel php artisan p:user:make
-
-    echo -e "${GREEN}🎉 Tayyor! Link: $AUTO_URL${RESET}"
-    
-elif [[ "$choice" == "B" || "$choice" == "b" ]]; then
-    echo "⏳ Wings hali qo'shilmagan"
-
-elif [[ "$choice" == "C" || "$choice" == "c" ]]; then
-    echo "Chiqildi."
-    exit
-else
-    echo "❌ Noto'g'ri tanlov"
+# 3. Portni avtomatik ochish buyrug'i (Codespaces uchun)
+if [[ "$CODESPACE_NAME" != "" ]]; then
+    gh browse -p 8030 > /dev/null 2>&1
 fi
+
+echo -e "${YELLOW}🚀 Konteynerlar ishga tushmoqda...${RESET}"
+docker-compose up -d > /dev/null 2>&1
+
+echo -e "${YELLOW}🛠 Login xatoliklari tuzatilmoqda (20 soniya kuting)...${RESET}"
+sleep 20
+
+# 4. Login xatosini (Unexpected Error) yo'qotish buyruqlari
+docker exec -i panel php artisan key:generate --force > /dev/null 2>&1
+docker exec -i panel php artisan config:clear > /dev/null 2>&1
+docker exec -i panel php artisan cache:clear > /dev/null 2>&1
+
+echo -e "${GREEN}✅ Panel o'rnatildi!${RESET}"
+echo -e "${CYAN}👤 ENDI ADMIN USER MA'LUMOTLARINI KIRITING:${RESET}"
+echo "------------------------------------"
+
+# Srazu user yaratish bo'limiga o'tadi
+docker exec -it panel php artisan p:user:make
+
+echo "------------------------------------"
+echo -e "${GREEN}🎉 TAYYOR!${RESET}"
+echo -e "1. Pastdagi 'PORTS' bo'limiga o'ting."
+echo -e "2. 8030 portini o'ng tugma bilan bosib 'Port Visibility -> Public' qiling."
+echo -e "3. Mana bu linkka kiring: ${CYAN}$AUTO_URL${RESET}"
