@@ -1,19 +1,12 @@
 #!/bin/bash
 
-# Ranglar
+# Ranglar uchun
 CYAN='\e[36m'
 GREEN='\e[32m'
-RED='\e[31m'
 YELLOW='\e[33m'
 RESET='\e[0m'
 
 clear
-
-# Root huquqini tekshirish
-if [ "$EUID" -ne 0 ]; then 
-  echo -e "${RED}Xato: Iltimos, scriptni sudo bilan ishga tushiring!${RESET}"
-  exit 1
-fi
 
 # Banner
 echo -e "${CYAN}"
@@ -25,64 +18,112 @@ echo "██║  ██║██║  ██║██║  ██║██║ ╚�
 echo "╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝     ╚═╝╚═╝╚═════╝ ╚═╝╚═╝╚═╝  ╚═══╝"
 echo -e "${RESET}"
 
-echo "RAHMIDDIN VPS - Avtomatik O'rnatuvchi"
-echo "------------------------------------"
-echo "A : Pterodactyl Panel O'rnatish"
-echo "B : Wings O'rnatish (Yaqinda)"
-echo "C : Chiqish"
-echo "------------------------------------"
+echo "RAHMIDDIN VPS"
+echo ""
+echo "========================"
+echo "A : Pterodactyl panel o'rnatish"
+echo "B : Wings o'rnatish (hozircha ishlamaydi)"
+echo "C : Exit"
+echo "========================"
+echo ""
 
-read -p "Tanlovni kiriting (A/B/C): " choice
+read -p "Tanlang (A/B/C): " choice
 
-case $choice in
-    [Aa])
-        echo -e "${YELLOW}🔄 Tizim yangilanmoqda...${RESET}"
-        apt-get update -y && apt-get upgrade -y
+if [[ "$choice" == "A" || "$choice" == "a" ]]; then
+    echo -e "${YELLOW}✅ Pterodactyl panel o'rnatilmoqda...${RESET}"
+    
+    # Root huquqini tekshirish
+    if [ "$EUID" -ne 0 ]; then 
+      echo "Iltimos, scriptni sudo bilan ishga tushiring!"
+      exit 1
+    fi
 
-        echo -e "${YELLOW}🐳 Docker o'rnatilmoqda...${RESET}"
-        # Docker va kerakli paketlarni o'rnatish (Xatolarsiz usul)
-        apt-get install -y apt-transport-https ca-certificates curl software-properties-common
-        curl -fsSL https://download.docker.com/linux/ubuntu/gpg | apt-key add -
-        add-apt-repository "deb [arch=amd64] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" -y
-        apt-get update -y
-        apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
+    # Docker o'rnatish
+    apt update -y
+    apt install -y docker.io docker-compose
+    systemctl start docker
+    systemctl enable docker
 
-        # Docker-ni ishga tushirish
-        systemctl enable --now docker
+    # Papka yaratish
+    mkdir -p /var/www/pterodactyl
+    cd /var/www/pterodactyl
 
-        # Papka yaratish (Root yoki User papkasida)
-        mkdir -p /var/www/pterodactyl
-        cd /var/www/pterodactyl
+    # Codespaces URLni aniqlash
+    AUTO_URL="https://${CODESPACE_NAME}-8030.app.github.dev"
 
-        echo -e "${YELLOW}📥 Docker-compose fayli yuklanmoqda...${RESET}"
-        curl -o docker-compose.yml https://raw.githubusercontent.com/GHostMCuzb/Panel/refs/heads/main/docker-compose.yml
+    # Docker-compose faylini yaratish (Siz xohlagan kod)
+    cat <<EOF > docker-compose.yml
+version: '3.8'
 
-        # Docker-compose up (v2 formatida: 'docker compose')
-        echo -e "${YELLOW}🚀 Konteynerlar ishga tushmoqda...${RESET}"
-        docker compose up -d
+services:
+  database:
+    image: mariadb:10.5
+    restart: always
+    command: --default-authentication-plugin=mysql_native_password
+    volumes:
+      - "./data/database:/var/lib/mysql"
+    environment:
+      MYSQL_DATABASE: "panel"
+      MYSQL_USER: "pterodactyl"
+      MYSQL_PASSWORD: "YourSecurePassword"
+      MYSQL_ROOT_PASSWORD: "YourRootPassword"
 
-        echo -e "${GREEN}------------------------------------"
-        echo "Konteynerlar tayyor!"
-        echo "------------------------------------${RESET}"
+  cache:
+    image: redis:alpine
+    restart: always
 
-        # Bir oz kutish (Baza tayyor bo'lishi uchun)
-        echo "Baza yuklanishini 10 soniya kutamiz..."
-        sleep 10
+  panel:
+    image: ghcr.io/pterodactyl/panel:latest
+    restart: always
+    ports:
+      - "8030:80"
+    links:
+      - database
+      - cache
+    volumes:
+      - "./data/var:/app/var"
+      - "./data/nginx:/etc/nginx/http.d"
+      - "./data/logs:/app/storage/logs"
+    environment:
+      APP_URL: "$AUTO_URL"
+      APP_TIMEZONE: "UTC"
+      APP_ENV: "production"
+      APP_ENVIRONMENT_ONLY: "false"
+      CACHE_DRIVER: "redis"
+      SESSION_DRIVER: "redis"
+      QUEUE_DRIVER: "redis"
+      REDIS_HOST: "cache"
+      DB_HOST: "database"
+      DB_PORT: "3306"
+      DB_DATABASE: "panel"
+      DB_USERNAME: "pterodactyl"
+      DB_PASSWORD: "YourSecurePassword"
+      TRUSTED_PROXIES: "*"
+EOF
 
-        echo -e "${CYAN}👤 Admin yaratish jarayoni boshlanmoqda...${RESET}"
-        # Konteyner nomini avtomatik aniqlash va foydalanuvchi yaratish
-        docker exec -it $(docker ps -qf "name=panel") php artisan p:user:make
+    # Ishga tushirish
+    docker-compose up -d
 
-        echo -e "${GREEN}🎉 Pterodactyl muvaffaqiyatli o'rnatildi!${RESET}"
-        ;;
-    [Bb])
-        echo -e "${YELLOW}⏳ Wings funksiyasi ustida ish ketmoqda...${RESET}"
-        ;;
-    [Cc])
-        echo "Xayr!"
-        exit 0
-        ;;
-    *)
-        echo -e "${RED}❌ Noto'g'ri tanlov!${RESET}"
-        ;;
-esac
+    echo -e "${YELLOW}⏳ Tizim sozlanmoqda (20 soniya kuting)...${RESET}"
+    sleep 20
+
+    # Login Error (Unexpected Error) ni tuzatish uchun muhim qism
+    docker exec -i panel php artisan key:generate --force
+    docker exec -i panel php artisan config:clear
+    docker exec -i panel php artisan cache:clear
+
+    echo "------------------------------------"
+    echo -e "${GREEN}Admin panel yaratishni boshlaymiz:${RESET}"
+    docker exec -it panel php artisan p:user:make
+
+    echo -e "${GREEN}🎉 Tayyor! Link: $AUTO_URL${RESET}"
+    
+elif [[ "$choice" == "B" || "$choice" == "b" ]]; then
+    echo "⏳ Wings hali qo'shilmagan"
+
+elif [[ "$choice" == "C" || "$choice" == "c" ]]; then
+    echo "Chiqildi."
+    exit
+else
+    echo "❌ Noto'g'ri tanlov"
+fi
